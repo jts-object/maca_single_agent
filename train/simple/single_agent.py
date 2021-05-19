@@ -89,8 +89,8 @@ class RLFighter(object):
         self.reward_ph = tf.placeholder(dtype=tf.float32, shape=[None, ], name='reward')
         
     def get_model_output(self):
-        self.infer_head0_pointers, self.infer_head0_pointer_prob, self.infer_head1_action, self.infer_head1_logits, self.infer_head2_action, self.infer_head2_prob, self.infer_value, _ = self.infer_net.output()
-        self.head0_pointers, self.head0_pointer_prob, self.head1_action, self.head1_logits, self.head2_action, self.head2_prob, self.value, self.vector = self.train_net.output()
+        self.infer_head0_pointers, self.infer_head0_pointer_prob, self.infer_head1_action, self.infer_head1_logits, self.infer_head2_action, self.infer_head2_prob, self.infer_value, _, __ = self.infer_net.output()
+        self.head0_pointers, self.head0_pointer_prob, self.head1_action, self.head1_logits, self.head2_action, self.head2_prob, self.value, self.vector, self.value_fore = self.train_net.output()
 
         self.infer_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='infer_model')
         self.train_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='train_model')
@@ -233,6 +233,9 @@ class RLFighter(object):
             if 'bias' not in var.name:
                 self.var_list.append(var)
         
+        for i, var in enumerate(self.var_list):
+            print('number:{}, var:{}'.format(i, var))
+        
         cliped_gvs = [(tf.clip_by_norm(grad, 1.e3), var) for grad, var in gvs if grad is not None]
         self.grads = [grad for grad, _ in cliped_gvs if grad is not None]
         
@@ -280,11 +283,11 @@ class RLFighter(object):
         # 更新旧网络的参数
         self.sess.run(self.update_param_op)
 
-        _, new_head0_prob, new_logp_head0, old_logp_head0, new_logp_head1, old_logp_head1, ratio, adv, surr, new_logit, old_logit, p_loss, loss, v_loss, value, target_v, vector, grads, varss = self.sess.run(
+        _, new_head0_prob, new_logp_head0, old_logp_head0, new_logp_head1, old_logp_head1, ratio, adv, surr, new_logit, old_logit, p_loss, loss, v_loss, value, target_v, vector, value_fore, grads, varss = self.sess.run(
             [
                 self.train_op, self.head0_pointer_prob, self.new_neglogp_head0, self.old_neglogp_head0, self.new_neglogp_head1, self.old_neglogp_head1, 
                 self.ratio, self.advantage, self.surr, self.new_logits_head1, self.old_logits_head1, self.policy_loss, self.loss, 
-                self.value_loss, self.value, self.target_value_ph, self.vector, self.grads, self.var_list], feed_dict=self.feed_dict)
+                self.value_loss, self.value, self.target_value_ph, self.vector, self.value_fore, self.grads, self.var_list], feed_dict=self.feed_dict)
         
 
         # print('vector: ', vector[0])
@@ -305,17 +308,21 @@ class RLFighter(object):
         print('loss: ', loss)
         print('value:', value)
         print('target_value:', target_v)
+        print('value fore row 0:', value_fore[0])
+        print('value fore row 2:', value_fore[2])
         
         from tensorflow.python.util import nest
-        print('len of varss', len(varss))
-        print('len of grads', len(grads))
-        sys.exit(0)
         
-        for item1, item2 in zip(nest.flatten(varss), nest.flatten(grads)):
-            print('norm of params:', np.linalg.norm(item1[0]))
-            print('norm of grads:', np.linalg.norm(item2[0]))
+        
+        for i, item in enumerate(varss):
+            print('number:{}, norm of params:{}'.format(i, np.linalg.norm(item)))
 
-        
+        print('last param:', varss[-1])
+
+        for item in grads:
+            print('norm of grads:', np.linalg.norm(item))
+
+
     def save_model(self, model_path, model_name, iterations):
         self.saver.save(self.sess, os.path.join(model_path, model_name + iterations))
 

@@ -93,15 +93,16 @@ class Network(object):
                     tf.gather_nd(out_head2_prob, gather_index))
 
             with tf.variable_scope('value'):
-                value = tf.layers.dense(inputs=hid_state, units=256, activation=tf.nn.relu, kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+                value = tf.layers.dense(inputs=hid_state, units=32, activation=tf.nn.relu, kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
                 # value = tc.layers.layer_norm(value, center=True, scale=True)
+                self.value_fore = value
                 self.value = tf.squeeze(tf.layers.dense(inputs=value, units=1, activation=tf.nn.relu, kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0)), axis=-1)
                 
 
     def output(self):
         self.batch_first_pointers = tf.transpose(self.ptr_net1.pointers, [1, 0])
         self.batch_first_pointer_prob = tf.transpose(self.ptr_net1.pointer_prob, [1, 0, 2])
-        return self.batch_first_pointers, self.batch_first_pointer_prob, self.out_head1_action, self.out_head1_logits, self.out_head2_action, self.out_head2_prob, self.value, self.thought_vector
+        return self.batch_first_pointers, self.batch_first_pointer_prob, self.out_head1_action, self.out_head1_logits, self.out_head2_action, self.out_head2_prob, self.value, self.thought_vector, self.value_fore
                 
 
 if __name__ == '__main__':
