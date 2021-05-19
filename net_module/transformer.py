@@ -332,9 +332,9 @@ class Transformer(BaseModel):
 
         with tf.variable_scope(scope):
             # Linear project to d_model dimension: [batch, q_size/k_size, d_model]
-            Q = tf.layers.dense(query, self.d_model, activation=tf.nn.relu)
-            K = tf.layers.dense(memory, self.d_model, activation=tf.nn.relu)
-            V = tf.layers.dense(memory, self.d_model, activation=tf.nn.relu)
+            Q = tf.layers.dense(query, self.d_model, activation=tf.nn.relu, kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+            K = tf.layers.dense(memory, self.d_model, activation=tf.nn.relu, kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
+            V = tf.layers.dense(memory, self.d_model, activation=tf.nn.relu, kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0))
 
             # Split the matrix to multiple heads and then concatenate to have a larger
             # batch size: [h*batch, q_size/k_size, d_model/num_heads]

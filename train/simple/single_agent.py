@@ -1,13 +1,15 @@
 from net_module.network import Network
 import tensorflow as tf
 from tensorflow.distributions import Categorical
+import tensorflow.contrib as tc
 import numpy as np 
 import os
+import sys
 
 class RLFighter(object):
     def __init__(
         self, 
-        learning_rate=1e-5,
+        learning_rate=1e-2,
         reward_decay=0.9,
         batch_size=32,
         n_pointers=3,
@@ -56,11 +58,8 @@ class RLFighter(object):
         
     def init(self):
         self.build_loss()
-        self.build_summary()
+        # self.build_summary()
         self.sess.run(tf.global_variables_initializer())
-
-        # self.behavior_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='behavior_net')
-        # self.target_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='target_net')
 
     def init_ph(self):
         """ 推断用的占位符 """
@@ -92,7 +91,13 @@ class RLFighter(object):
     def get_model_output(self):
         self.infer_head0_pointers, self.infer_head0_pointer_prob, self.infer_head1_action, self.infer_head1_logits, self.infer_head2_action, self.infer_head2_prob, self.infer_value, _ = self.infer_net.output()
         self.head0_pointers, self.head0_pointer_prob, self.head1_action, self.head1_logits, self.head2_action, self.head2_prob, self.value, self.vector = self.train_net.output()
-    
+
+        self.infer_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='infer_model')
+        self.train_params = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='train_model')
+
+        self.update_param_op = [old_p.assign(p) for p, old_p in zip(self.train_params, self.infer_params)]
+
+
     def choose_action(self, obs, en_obs, mem_mask1, mem_mask2, action_mask):
         head0_pointers, head0_pointer_prob, head1_act, head1_logits, head2_act, head2_prob, value = self.sess.run([
             self.infer_head0_pointers, 
@@ -113,7 +118,7 @@ class RLFighter(object):
     
     def build_summary(self):
         tf.summary.scalar('loss', self.loss)
-        tf.summary.scalar('reward', self.reward_ph)
+        tf.summary.scalar('reward', tf.reduce_sum(self.reward_ph))
         self.merged = tf.summary.merge_all()
 
         # 指定一个文件来保存图，第一个参数给定的是地址，通过调用 tensorboard --logdir=$(pwd) 查看 tensorboard
@@ -139,31 +144,35 @@ class RLFighter(object):
         neglogp_head0 = tf.clip_by_value(-tf.log(tf.reduce_prod(head0_prob, axis=1)), -1.e6, 1.e6)     # 最后维度: [batch]
         
         self.new_neglogp_head0 = neglogp_head0  # debug
+
         # 得到当前动作在旧策略下的概率
         range_ = tf.range(self.head0_pointer_prob.shape.as_list()[1])
+        # range_ = tf.zeros(self.head0_pointer_prob.shape.as_list()[1], dtype=tf.int32)
         range_ = tf.tile(tf.expand_dims(range_, axis=0), [self.head0_pointer_prob.shape.as_list()[0], 1])
         index = tf.stack([range_, self.head0_pointers], axis=0)
 
-        range_ = tf.range(self.head0_pointer_prob.shape.as_list()[0])
+        # range_ = tf.range(self.head0_pointer_prob.shape.as_list()[0])
+        range_ = tf.zeros(self.head0_pointer_prob.shape.as_list()[0], dtype=tf.int32)
         range_ = tf.tile(tf.expand_dims(range_, axis=1), [1, self.head0_pointer_prob.shape.as_list()[1]])
         res = tf.concat([tf.expand_dims(range_, axis=0), index], axis=0)
         final_index = tf.transpose(res, [1, 2, 0])
         
         head0_prob = tf.gather_nd(self.act_prob_head0_ph, final_index)     # self.act_prob_head0 存储的是旧策略对应的概率
-        old_neglogp_head0 = tf.clip_by_value(-tf.log(tf.reduce_prod(head0_prob, axis=1)), -1.e6, 1.e6)     # 维度: [batch]
+        head0_prob = tf.clip_by_value(head0_prob, 1e-3, 1e5)
+        old_neglogp_head0 = tf.clip_by_value(-tf.log(tf.reduce_prod(head0_prob, axis=1)), -1.e3, 1.e3)     # 维度: [batch]
 
         self.old_neglogp_head0 = old_neglogp_head0  # debug
 
         
         # 第二步得到 head1 的输出概率
         # # 得到在当前网络输出之下的动作概率
-        # behavior_dist = Categorical(logits=self.head1_logits)
-        # neglogprob_head1 = tf.clip_by_value(-tf.log(behavior_dist.prob(self.head1_action)), -1.e5, 1.e5)
-        neglogprob_head1 = -tf.reduce_max(self.head1_logits, axis=-1)
+        behavior_dist = Categorical(logits=self.head1_logits)
+        neglogprob_head1 = tf.clip_by_value(-tf.log(behavior_dist.prob(self.head1_action)), -1.e5, 1.e5)
+        # neglogprob_head1 = -tf.reduce_max(self.head1_logits, axis=-1)       # debug
         
-        # old_dist = Categorical(logits=self.act_logits_head1_ph)
-        # old_neglogprob_head1 = tf.clip_by_value(-tf.log(old_dist.prob(self.action_head1_ph)), -1e5, 1.e5)
-        old_neglogprob_head1 = -tf.reduce_max(self.act_logits_head1_ph, axis=-1)
+        old_dist = Categorical(logits=self.act_logits_head1_ph)
+        old_neglogprob_head1 = tf.clip_by_value(-tf.log(old_dist.prob(self.action_head1_ph)), -1e5, 1.e5)
+        # old_neglogprob_head1 = -tf.reduce_max(self.act_logits_head1_ph, axis=-1)        # debug
 
         self.new_neglogp_head1 = neglogprob_head1    # debug
         self.old_neglogp_head1 = old_neglogprob_head1    # debug
@@ -174,7 +183,6 @@ class RLFighter(object):
         self.old_neglogp = tf.stop_gradient(old_neglogp_head0 + old_neglogprob_head1)
         self.neglogp = neglogp_head0 + neglogprob_head1
 
-        
         ratio = tf.clip_by_value(tf.exp(self.old_neglogp - self.neglogp), -1e4, 1e4)
         self.ratio = ratio  # debug
 
@@ -184,11 +192,10 @@ class RLFighter(object):
         advantage = tf.stop_gradient(advantage) # 为何 advantage 不需要导致梯度的反向传播。应该是为了防止重复计算吧
 
         self.advantage = advantage  # debug
-        # ppo loss
+        # ppo loss 
         surr1 = ratio * advantage
         surr2 = tf.clip_by_value(ratio, 1 - self.clip_param, 1 + self.clip_param) * advantage
-        # surr = tf.minimum(surr1, surr2) 
-        surr = surr2    # debug 
+        surr = tf.minimum(surr1, surr2) 
 
         self.surr1 = surr1  # debug
         self.surr2 = surr2  # debug
@@ -198,7 +205,6 @@ class RLFighter(object):
         ratio_diff = tf.reduce_mean(tf.abs(ratio - 1.))
 
         self.policy_loss = - tf.reduce_mean(surr)
-        # value_loss_1 = - tf.reduce_mean(value * advantage)
 
         # vpredclipped 是为了保证与 behavior_value 差距不是太远，增加了训练的稳定性
         vpredclipped = self.behavior_value_ph + tf.clip_by_value(self.value - self.behavior_value_ph,
@@ -206,38 +212,33 @@ class RLFighter(object):
                                                         self.clip_param)
         vf_losses1 = tf.square(self.value - self.target_value_ph)
         vf_losses2 = tf.square(vpredclipped - self.target_value_ph)
-        # self.value_loss = .5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2))
-        self.value_loss = vf_losses1
+        self.value_loss = .5 * tf.reduce_mean(tf.maximum(vf_losses1, vf_losses2))
 
         # entropy
         # entropy = distribution_head0.entropy(behavior_action_head0)
-        # mean_entropy = tf.reduce_mean(entropy)
 
-        # loss = policy_loss + value_loss * self.vf_loss_coeff - mean_entropy * self.entropy_coeff
         self.loss = self.policy_loss + self.value_loss * self.vf_loss_coeff
 
         # 测试不同优化器的影响
-        # optimizer = tf.train.AdamOptimizer(self.learning_rate)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         # optimizer = tf.train.MomentumOptimizer(self.learning_rate, momentum=0.2)
         # optimizer = tf.train.RMSPropOptimizer(self.learning_rate)
-        optimizer = tf.train.AdadeltaOptimizer(self.learning_rate)
+        # optimizer = tf.train.AdadeltaOptimizer(self.learning_rate)
         gvs = optimizer.compute_gradients(self.loss)
-        self.grads = [grad for grad, _ in gvs if grad is not None]
-        self.var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) # debug，所有可训练参数
-        for grad, var in gvs:
-            if grad is not None:
-                print('grad:', grad)
-                print('var:', var)
         
-
-        cliped_gvs = [(tf.clip_by_norm(grad, 2.), var) for grad, var in gvs if grad is not None]
-
-        self.cliped_gvs = cliped_gvs
+        # 得到 train_model 的所有非偏置参数
+        var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='train_model') # debug，得到所有可训练参数
+        self.var_list = []
+        for var in var_list:
+            if 'bias' not in var.name:
+                self.var_list.append(var)
+        
+        cliped_gvs = [(tf.clip_by_norm(grad, 1.e3), var) for grad, var in gvs if grad is not None]
+        self.grads = [grad for grad, _ in cliped_gvs if grad is not None]
+        
+        self.cliped_gvs = cliped_gvs    # for debug
         self.train_op = optimizer.apply_gradients(cliped_gvs)
 
-    # def update_param(self):
-    #     assign_op = [tf.assign(t, b) for t, b in zip(self.target_params, self.behavior_params)]
-    #     self.sess.run(assign_op)
 
     def learn(
         self, obs_list, en_obs_list, next_obs_list, next_en_obs_list, mem_mask1_list, mem_mask2_list, act_mask_list,
@@ -276,38 +277,45 @@ class RLFighter(object):
                 self.reward_ph: reward_array,
             }
 
-        _, new_head0_prob, new_logp_head0, old_logp_head0, new_logp_head1, old_logp_head1, ratio, adv, surr1, surr2, surr, new_logit, old_logit, p_loss, loss, v_loss, value, target_v, vector, grads, varss = self.sess.run(
+        # 更新旧网络的参数
+        self.sess.run(self.update_param_op)
+
+        _, new_head0_prob, new_logp_head0, old_logp_head0, new_logp_head1, old_logp_head1, ratio, adv, surr, new_logit, old_logit, p_loss, loss, v_loss, value, target_v, vector, grads, varss = self.sess.run(
             [
                 self.train_op, self.head0_pointer_prob, self.new_neglogp_head0, self.old_neglogp_head0, self.new_neglogp_head1, self.old_neglogp_head1, 
-                self.ratio, self.advantage, self.surr1, self.surr2, self.surr, self.new_logits_head1, self.old_logits_head1, self.policy_loss, self.loss, 
+                self.ratio, self.advantage, self.surr, self.new_logits_head1, self.old_logits_head1, self.policy_loss, self.loss, 
                 self.value_loss, self.value, self.target_value_ph, self.vector, self.grads, self.var_list], feed_dict=self.feed_dict)
         
+
         # print('vector: ', vector[0])
         # print('new_head0_prob: ', new_head0_prob)
         # print('new_logp_head0: ', new_logp_head0)
         # print('old_logp_head0: ', old_logp_head0)
-        print('new logit :', new_logit)
-        print('old_logit : ', old_logit)
+        # print('new logit :', new_logit)
+        # print('old_logit : ', old_logit)
         # print('new_logp_head1: ', new_logp_head1)
         # print('old_logp_head1: ', old_logp_head1)
         print('ratio: ', ratio)
-        # print('adv: ', adv)
+        print('adv: ', adv)
         # print('surr1: ', surr1)
         # print('surr2: ', surr2)
         # print('surr: ', surr)
-        # print('value loss: ', v_loss)
+        print('value loss: ', v_loss)
         # print('policy loss: ', p_loss)
         print('loss: ', loss)
         print('value:', value)
         print('target_value:', target_v)
         
         from tensorflow.python.util import nest
+        print('len of varss', len(varss))
+        print('len of grads', len(grads))
+        sys.exit(0)
         
         for item1, item2 in zip(nest.flatten(varss), nest.flatten(grads)):
-            # print('item1:', item1)
-            print('item2:', item2)
+            print('norm of params:', np.linalg.norm(item1[0]))
+            print('norm of grads:', np.linalg.norm(item2[0]))
+
         
-       
     def save_model(self, model_path, model_name, iterations):
         self.saver.save(self.sess, os.path.join(model_path, model_name + iterations))
 

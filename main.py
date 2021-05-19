@@ -67,10 +67,7 @@ if __name__ == "__main__":
     blue_agent.set_map_info(size_x, size_y, blue_detector_num, blue_fighter_num)
 
     red_detector_action = []
-    # fighter_model = dqn.RLFighter(ACTION_NUM)
-    # fighter_model = qmix.RLFighter(num_act=3, agent_num=10, num_units=20)
     fighter_model = single_agent.RLFighter(batch_size=BATCH_SIZE)
-    has_initialized = False
     
     # 模型保存相关参数
     train_epoch = 0
@@ -193,7 +190,6 @@ if __name__ == "__main__":
                 # summ = fighter_model.output_summ()
                 # fighter_model.train_writer.add_summary(summ, step_cnt)
 
-                # print('action_head1_list:', action_head1_list)
                 obs_list.clear()
                 en_obs_list.clear() 
                 next_obs_list.clear() 

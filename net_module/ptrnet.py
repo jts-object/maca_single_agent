@@ -41,8 +41,8 @@ class PointerNet(object):
         # for i in range(101):
         #     word_matrix[i][0] = float(i+1)
         
-        word_matrix = np.random.normal(size=[13, 6], loc=10000., scale=2000.)
-        self.word_matrix = tf.Variable(word_matrix, trainable=True, name=name + 'word_matrix', dtype=tf.float32)
+        # word_matrix = np.random.normal(size=[13, 6], loc=10000., scale=2000.)
+        # self.word_matrix = tf.Variable(word_matrix, trainable=True, name=name + 'word_matrix', dtype=tf.float32)
 
     def encoder(self):
         with tf.variable_scope(self.name + 'inputs'):
@@ -106,7 +106,8 @@ class PointerNet(object):
                 dec_cell = self.cell(self.n_units)   
             
             attn_cell = AttentionWrapper(dec_cell, attention, alignment_history=True)
-            out_cell = tf.contrib.rnn.OutputProjectionWrapper(attn_cell, self.word_matrix.shape[0] - 2)
+            # out_cell = tf.contrib.rnn.OutputProjectionWrapper(attn_cell, self.word_matrix.shape[0] - 2)
+            out_cell = tf.contrib.rnn.OutputProjectionWrapper(attn_cell, 16)
             decoder = BasicDecoder(out_cell, helper, out_cell.zero_state(batch_size, tf.float32))
 
             self.decoder_outputs, self.dec_state, _, self.rec_inputs, self.rec_dec_finished, self.final_sample_id_ta = dynamic_decode(
